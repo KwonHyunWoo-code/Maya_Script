@@ -1,0 +1,301 @@
+CallAMTNormalToolLT;
+
+global proc CallAMTNormalToolLT() {
+
+
+string $AMTNormalPath = (`internalVar -userScriptDir`) + "AMTNormalsLT/";
+
+string $AMTNormalsLT = "AMTNormalToolLT";
+
+if ( `window -exists $AMTNormalsLT` ) { deleteUI $AMTNormalsLT; windowPref -remove $AMTNormalsLT;}
+ // windowPref -remove $AMTNormalsLT;
+// windowPref -query -widthHeight $AMTNormalsLT; //real window size.
+
+window -title "AMT Normal Tools LT 1.0" -s true -wh 257 188 -bgc  (45/255.0) (50/255.0) (55/255.0)
+            -mxb false -tlb true $AMTNormalsLT;
+
+string $FaceWeightOps = `frameLayout -cll 0 -label "FACE WEIGHTED WORKFLOW" -labelVisible false`;
+
+rowColumnLayout -numberOfRows 1;
+
+button -l "Weight Face Normals" -command ("PickLTOperation")
+             -bgc  (26/255.0) (30/255.0) (32/255.0) -h 30 -w 255;
+
+setParent ..;
+
+separator -h 1 -st "in" -hr 1;
+
+rowColumnLayout -numberOfRows 1;
+
+iconTextButton -style "iconAndTextHorizontal"
+    -image ($AMTNormalPath + "Vertex_Display.png")
+    -font "boldLabelFont"
+    -ann "Enabled"
+    -label "Vertex Display"
+    -w 125
+    -command ("setPolygonDisplaySettings(\"vNormal\")") VertexDisplayBTN;
+
+iconTextButton -style "iconAndTextHorizontal"
+    -image ($AMTNormalPath + "Face_Display.png")
+    -font "boldLabelFont"
+    -ann "Enabled"
+    -label "Face Display"
+    -w 125
+    -command ("setPolygonDisplaySettings(\"fNormal\")") FaceDisplayBTN;
+
+setParent..;
+
+rowColumnLayout -numberOfRows 1;
+
+iconTextButton -style "iconAndTextHorizontal"
+    -image ($AMTNormalPath + "SelectHard.png")
+    -font "boldLabelFont"
+    -ann ""
+     -w 125
+    -label "Sel. Hard Edges"
+    -command ("SelectHardEdges") SelectHardBTN;
+
+
+iconTextButton -style "iconAndTextHorizontal"
+    -image ($AMTNormalPath + "SelectSoft.png")
+    -font "boldLabelFont"
+    -ann ""
+     -w 125
+    -label "Sel. Soft Edges"
+    -command ("SelectSoftdges") SelectSoftBTN;
+
+setParent..;
+
+separator -h 1 -st "in" -hr 1;
+text -fn "boldLabelFont" -label "Normals Display Size";
+separator -h 1 -st "in" -hr 1;
+
+float $NSizeValue[] = `polyOptions -q -sn`;
+
+floatSliderGrp
+     -field true
+    -minValue -0 -maxValue 250.0
+    -fieldMinValue 0 -fieldMaxValue 1000
+    -value $NSizeValue[0]
+    -cw 1 50
+    -dc ("ModifyNormalSize")
+    -cc ("ModifyNormalSize")
+    -cal 1 "center" NormalSizeSLDR;
+
+setParent $FaceWeightOps;
+
+
+showWindow;
+
+}
+
+/*################################################################################################
+################################################################################################
+################################################################################################/*/
+
+global proc EditBevelAttr() {
+
+string $Source_Mesh[] = `ls -sl -fl`;
+ 
+string $CurrentShape[] = `ls -sl -dag -o -fl -lf`;
+
+string $OBJSel[] = stringArrayRemoveDuplicates(`listRelatives -p -path $CurrentShape`);
+
+string $GetBevel[] = stringArrayRemoveDuplicates(`listConnections -scn true -d true 
+            -t "polyBevel3" -et true $CurrentShape[0]`);
+
+if( `dragAttrContext -exists "NormalsAttrCtx" ` ) { dragAttrContext -reset; }
+else { dragAttrContext NormalsAttrCtx; }
+
+dragAttrContext -edit
+-connectTo ($GetBevel[0] + ".fraction" + "\n")
+NormalsAttrCtx;
+
+setToolTo NormalsAttrCtx;
+
+}
+
+
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+
+
+global proc ModifyNormalSize() {
+
+float $GetSLDRVal = ` floatSliderGrp -q -v NormalSizeSLDR`; 
+
+polyOptions -sn $GetSLDRVal;
+
+}
+
+
+
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+
+global proc DisplayVNormals() {
+
+string $GetStat = `iconTextButton -q -ann VertexDisplayBTN`;
+string $GetStatF = `iconTextButton -q -ann FaceDisplayBTN`;
+
+if ($GetStat == "Disabled") { polyOptions -displayNormal true; polyOptions -pt;
+iconTextButton -e -ann "Enabled" VertexDisplayBTN;
+if ($GetStatF == "Enabled") { polyOptions -pf; }
+}
+
+else if ($GetStat == "Enabled") { polyOptions -displayNormal false; polyOptions -pt;
+iconTextButton -e -ann "Disabled" VertexDisplayBTN;
+
+}
+
+}
+
+
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+
+
+global proc SelectHardEdges() {
+
+resetPolySelectConstraint; polySelectConstraint -m 3 -t 0x8000 -sm 1; polySelectConstraint -m 0;
+
+}
+
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+
+
+global proc SelectSoftdges() {
+
+resetPolySelectConstraint; polySelectConstraint -m 3 -t 0x8000 -sm 2; polySelectConstraint -m 0;
+
+}
+
+
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+
+global proc VariableShadowDisable() {
+    
+    if (`exists melOptions`) { melOptions -duplicateVariableWarnings off;}
+    
+}
+
+
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+
+
+global proc FWVNLT() {
+
+string $CurrentShape[] = `ls -sl -dag -o -fl -lf`;
+
+string $OBJSel[] = stringArrayRemoveDuplicates(`listRelatives -p -path $CurrentShape`);
+
+int $IsFace = size(`filterExpand -sm 34`);
+
+int $IsPolygon = size(`filterExpand -sm 12`);
+
+if ( ($IsPolygon >= 1) && ($IsFace == 0) ) {
+
+string $GetBevel[] = stringArrayRemoveDuplicates(`listConnections -scn true -d true 
+            -t "polyBevel3" -et true $CurrentShape[0]`);
+
+if (size($GetBevel) == 0) {
+
+resetPolySelectConstraint;
+polySelectConstraint -m 3 -t 0x8000 -sm 1;
+polySelectConstraint -m 0;
+
+     
+$GetBevel = `polyBevel3 -fraction 0.1 -offsetAsFraction 0 -segments 1 
+     -worldSpace true -fillNgons true -mergeVertices true -offset 0.01
+     -mergeVertexTolerance 0.0001 -smoothingAngle 180 -miteringAngle 180 
+     -angleTolerance 180 -ch true `;
+
+
+polySoftEdge -a 180 -ch 1 $OBJSel;
+polyNormalPerVertex -fn true $OBJSel;
+
+setAttr ($GetBevel[0] + ".offsetAsFraction") 1;
+
+select $OBJSel;
+EditBevelAttr;
+
+}
+
+else {
+
+setAttr ($GetBevel[0] + ".offsetAsFraction") 0;
+setAttr ($GetBevel[0] + ".offset") 0.01;
+
+polySoftEdge -a 180 -ch 1 $OBJSel;
+polyNormalPerVertex -fn true $OBJSel;
+setAttr ($GetBevel[0] + ".offsetAsFraction") 1;
+select $OBJSel;
+EditBevelAttr;
+
+}
+
+}
+
+else if ( ($IsPolygon == 0) && ($IsFace >= 1) ) {
+
+string $TargetFaces[] = `ls -sl -fl`;
+
+for ($Face in $TargetFaces) {
+
+string $faceNormal[] = `polyInfo -fn $Face`;
+$array = stringToStringArray($faceNormal[0], " ");
+float $X = $array[2];
+float $Y = $array[3];
+float $Z = $array[4];
+
+string $TargetVerts[] = `polyListComponentConversion -ff -tv $Face`;
+
+polyNormalPerVertex -xyz $X $Y $Z $TargetVerts;
+
+
+}
+
+}
+
+else { warning "Hmmm, you don't seem to have a mesh selected. Dafuk ?!"; }
+
+
+}
+
+
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+
+global proc PickLTOperation() {
+
+  int $GetOperand = `getModifiers`;
+
+  if ( $GetOperand == 0 ) { FWVNLT(); }
+
+  else if ( $GetOperand == 4 ) {
+$AMTNormalsLTHelper = "LTHelper";
+
+string $AMTNormalHelper = (`internalVar -userScriptDir`) + "AMTNormalsLT/DocHelper.png";
+// if ( `window -exists $AMTNormalsLTHelper` ) { deleteUI $AMTNormalsLTHelper; windowPref -remove $AMTNormalsLTHelper; }
+
+if ( `window -exists $AMTNormalsLTHelper` ) { deleteUI $AMTNormalsLTHelper;}
+
+window -title "AMT Helper Tool"  -s true -mxb false $AMTNormalsLTHelper;
+
+frameLayout -cll 0 -label "Face Weighted Vertex Normals Guide" -labelVisible true -fn "fixedWidthFont";
+
+columnLayout -adjustableColumn true;
+
+image -image $AMTNormalHelper;
+
+showWindow;
+  }
+
+}
+
+
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
+// ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
