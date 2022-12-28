@@ -1,0 +1,566 @@
+
+//
+//	Plot Particles v1.0
+//
+//	Written by Seth Hall
+//	sethtylerhall@gmail.com
+//	www.pixill.com
+//	September 2019
+//
+//	To execute:
+//		Place this in your scripts folder and source it then run one of the below commmands.
+//
+//		shPlotParticleCurves 0;
+//		shPlotParticleCurves 1;
+//
+//		0 = Run the script with something selected to generate your trails.
+//		1 = Run the script with a generated trail selected to edit the curve warp properties.
+//
+//	It is suggested to use this on selected vertices, poly objects, nurbs, locators, etc.
+//	Anything that can be transformed and animated.
+//
+//	v1.0: initial release
+//
+
+global proc string[] shPlotParticleShapeType(string $obj) {
+	string $output[];
+
+	if (`nodeType $obj` == "transform") {
+		string $rel[] = `listRelatives -s $obj`;
+		$output[0] = $rel[0];
+	}
+
+	if (`objExists $output[0]`) {
+		$output[1] = `nodeType $output[0]`;
+	} else {
+		$output[1] = `nodeType $obj`;
+	}
+
+	return $output;
+}
+
+// 0 = root
+// 1 = profile curves
+// 2 = spine curves
+// 3 = geometry
+global proc string[] shPlotSetupParticleGroupHierarchy(string $object) {
+	string $groups[];
+
+	string $root;
+	string $profile;
+	string $spine;
+	string $geo;
+
+	if (!`objExists $root`) {
+		$root = ($object + "_PlotCurves#");
+		$profile = ($object + "_Profile#");
+		$spine = ($object + "_Spines#");
+		$geo = ($object + "_Geo#");
+	}
+
+	$groups[0] = `group -em -n $root`;
+	$groups[1] = `group -em -n $profile`;
+	$groups[2] = `group -em -n $spine`;
+	$groups[3] = `group -em -n $geo`;
+
+	parent $groups[1] $groups[2] $groups[3] $groups[0];
+
+	setAttr ($groups[1] + ".v") 0;
+
+	return $groups;
+}
+
+global proc shPlotSetupParticleProjectedUV(string $object, string $axis) {
+	select -r ($object + ".f[*]");
+	string $faces[] = `ls -sl -fl`;
+
+	int $count = `size($faces)` - 1;
+
+	string $proj = ($object + ".f[0:" + $count + "]");
+
+    polyProjection -ch 1 -type Planar -ibd on -md $axis $proj;
+
+	select -r;
+}
+
+// 0 = trail width
+// 1 = trail length
+global proc string[] shPlotCreateParticleTrails(string $curveName, string $spineCurves[], string $groups[], float $doPerpendicular, float $start, float $end, float $step) {
+	string $profileCurves[];
+	string $perpendicularCurve[];
+	string $extrusion[];
+	string $perpendicularExtrusion[];
+	string $deformers[];
+
+	int $doSurf = 0;
+
+	if (`optionMenu -q -sl plotPartiCurvesOnly` > 1) {
+		$doSurf++;
+	}
+
+	string $buffer[];
+	tokenize $curveName "_" $buffer;
+
+	int $divisions = 1;
+
+	string $widthName = ($buffer[0] + "_Width");
+	$profileCurves[0] = `curve -d 1 -p -1 0 0 -p 1 0 0 -k 0 -k 1 -n $widthName`;
+	rebuildCurve -ch 0 -rpo 1 -rt 0 -end 1 -kr 0 -kcp 0 -kep 1 -kt 0 -s 1 -d $divisions -tol 0 $profileCurves[0];
+
+	int $profileCount = 1;
+	int $extrudeCount = 0;
+
+	progressBar -e -bp -max `size($spineCurves)` plotPartiProgressBar;
+
+	int $i;
+	for ($i = 0; $i < size($spineCurves); $i++) {
+		string $newBuffer[];
+		tokenize $spineCurves[$i] "_" $newBuffer;
+
+		if ($doSurf > 0) {
+			string $lengthName = ($newBuffer[0] + "_" + $newBuffer[1] + "_Length");
+			int $length = `arclen $spineCurves[$i]`;
+			int $spans = `getAttr ($spineCurves[$i] + ".spans")`;
+
+			string $extrudeName = ($newBuffer[0] + "_" + $newBuffer[1] + "_Trail");
+
+			$profileCurves[$profileCount] = `curve -d 1 -p 0 0 0 -p 0 $length 0 -k 0 -k 1 -n $lengthName`;
+
+			string $extrude[] = `extrude -n $extrudeName -ch 1 -rn 0 -po 1 -et 2 -ucp 1 -fpt 1 -upn 1 -rotation 0 -scale 1 -rsp 1 $profileCurves[$profileCount] $profileCurves[0]`;
+
+			$extrusion[$extrudeCount] = `rename $extrude[0] $extrudeName`;
+			parent $extrusion[$extrudeCount] $groups[1];
+
+			rebuildCurve -ch 0 -rpo 1 -rt 0 -end 1 -kr 0 -kcp 0 -kep 1 -kt 0 -s $spans -d $divisions -tol 0 $profileCurves[$profileCount];
+			rebuildCurve -ch 0 -rpo 1 -rt 0 -end 1 -kr 0 -kcp 0 -kep 1 -kt 0 -s 0 -d $divisions -tol 0 $spineCurves[$i];
+
+			shPlotSetupParticleProjectedUV $extrusion[$extrudeCount] "z";
+
+			string $rename;
+			if ($doPerpendicular > 0) {
+				string $perpendicularGeo[] = `duplicate -n ($newBuffer[0] + "_" + $newBuffer[1] + "_WidthPerp") -rr $extrusion[$extrudeCount]`;
+				setAttr ($perpendicularGeo[0] + ".ry") 90;
+
+				string $merge[] = `polyUnite -ch 1 -mergeUVSets 1 -objectPivot $extrusion[$extrudeCount] $perpendicularGeo[0]`;
+				$extrusion[$extrudeCount] = `rename $merge[0] $extrudeName`;
+			}
+
+			addAttr -ln "particleBroom"  -dt "string" $extrusion[$extrudeCount];
+			setAttr -e -l 1 -keyable false ($extrusion[$extrudeCount] + ".particleBroom") -type "string" $deformers[$extrudeCount];
+
+			addAttr -ln "startFrame"  -at double  -dv 0 $extrusion[$extrudeCount];
+			setAttr -e -l 1 -keyable false ($extrusion[$extrudeCount] + ".startFrame") $start;
+
+			addAttr -ln "endFrame"  -at double  -dv 0 $extrusion[$extrudeCount];
+			setAttr -e -l 1 -keyable false ($extrusion[$extrudeCount] + ".endFrame") $end;
+
+			addAttr -ln "frameStep"  -at double  -dv 0 $extrusion[$extrudeCount];
+			setAttr -e -l 1 -keyable false ($extrusion[$extrudeCount] + ".frameStep") $step;
+
+			$deformers[$extrudeCount] = `createCurveWarp $extrusion[$extrudeCount] $spineCurves[$i]`;
+			setAttr ($deformers[$extrudeCount] + ".keepLength") 0;
+
+			if ($extrudeCount > 0) {
+				connectAttr -f ($deformers[0] + ".rotation") ($deformers[$extrudeCount] + ".rotation");
+				connectAttr -f ($deformers[0] + ".twistRotation") ($deformers[$extrudeCount] + ".twistRotation");
+				connectAttr -f ($deformers[0] + ".offset") ($deformers[$extrudeCount] + ".offset");
+				connectAttr -f ($deformers[0] + ".lengthScale") ($deformers[$extrudeCount] + ".lengthScale");
+				connectAttr -f ($deformers[0] + ".maxScale") ($deformers[$extrudeCount] + ".maxScale");
+				connectAttr -f ($deformers[0] + ".flipAxis") ($deformers[$extrudeCount] + ".flipAxis");
+
+				connectAttr -f ($deformers[0] + ".scaleCurve[0]") ($deformers[$extrudeCount] + ".scaleCurve[0]");
+				connectAttr -f ($deformers[0] + ".scaleCurve[1]") ($deformers[$extrudeCount] + ".scaleCurve[1]");
+				connectAttr -f ($deformers[0] + ".scaleCurve[2]") ($deformers[$extrudeCount] + ".scaleCurve[2]");
+				connectAttr -f ($deformers[0] + ".scaleCurve[3]") ($deformers[$extrudeCount] + ".scaleCurve[3]");
+
+				connectAttr -f ($deformers[0] + ".twistCurve[0]") ($deformers[$extrudeCount] + ".twistCurve[0]");
+				connectAttr -f ($deformers[0] + ".twistCurve[1]") ($deformers[$extrudeCount] + ".twistCurve[1]");
+				connectAttr -f ($deformers[0] + ".twistCurve[2]") ($deformers[$extrudeCount] + ".twistCurve[2]");
+				connectAttr -f ($deformers[0] + ".twistCurve[3]") ($deformers[$extrudeCount] + ".twistCurve[3]");
+			}
+
+			$extrudeCount++;
+		}
+
+		$profileCount++;
+
+		progressBar -e -s 1 plotPartiProgressBar;
+	}
+
+	parent $profileCurves $groups[1];
+
+	if ($doSurf > 0) {
+		parent $extrusion $groups[3];
+	}
+
+	select -r;
+
+	progressBar -e -ep plotPartiProgressBar;
+
+	return $profileCurves;
+}
+
+global proc shPlotDrawParticleSpineCurves(string $particles, string $spineCurves[], int $maxCount, float $step, float $start, float $end, string $curveName, string $groups[], float $doPerpendicular) {
+	int $totalFrames = ($end - $start) / $step;
+	float $maxProgress = $totalFrames * $maxCount;
+
+	float $current = `currentTime -e $start`;
+
+	progressBar -e -bp -max $maxProgress plotPartiProgressBar;
+
+	while ($current < $end) {
+		float $nextFrame;
+
+		$nextFrame = $current + $step;
+		$current = `currentTime -e $nextFrame`;
+
+		if ($current > $end) {
+			currentTime -e $end;
+			break;
+		} else {
+			int $x;
+			for ($x = 0; $x < $maxCount; $x++) {
+				float $transform[] = `nParticle -at position -order $x -q $particles`;
+
+				curve -a -p $transform[0] $transform[1] $transform[2] $spineCurves[$x];
+
+				progressBar -e -s 1 plotPartiProgressBar;
+			}
+		}
+	}
+
+	progressBar -e -ep plotPartiProgressBar;
+
+	string $profileCurves[] = `shPlotCreateParticleTrails $curveName $spineCurves $groups $doPerpendicular $start $end $step`;
+}
+
+global proc shPlotParticleSetupSpineCurves(float $frameStep, float $startFrame, float $endFrame, float $doPerpendicular) {
+	string $particles = `textField -q -tx plotParticlesObject`;
+	string $parent[] = `listRelatives -p $particles`;
+	int $maxCount = `nParticle -q -ct $particles`;
+
+	string $sel[];
+	$sel[0] = `textField -q -tx plotParticlesObject`;
+
+	string $groups[] = `shPlotSetupParticleGroupHierarchy $parent[0]`;
+	string $cleanName = $parent[0];
+	string $curveName = ($cleanName + "_SpineCurve");
+	string $initialSpineCurve[];
+
+	progressBar -e -bp -max $maxCount plotPartiProgressBar;
+
+	if (size($sel) > 1) {
+		$curveName = $curveName + "_";
+	}
+
+	currentTime -e $startFrame;
+
+	int $count = 0;
+
+	int $i;
+	for ($i = 0; $i < $maxCount; $i++) {
+		string $name;
+
+		if ($maxCount > 1) {
+			$name = ($curveName + $count);
+			$cleanName = $sel[$i];
+		} else {
+			$name = $curveName;
+		}
+
+		float $transform[] = `nParticle -at position -order $i -q $particles`;
+
+		$initialSpineCurve[$count] = `curve -d 3 -p $transform[0] $transform[1] $transform[2] -n $name`;
+		$count++;
+
+		progressBar -e -s 1 plotPartiProgressBar;
+	}
+
+	progressBar -e -ep plotPartiProgressBar;
+
+	parent $initialSpineCurve $groups[2];
+
+	shPlotDrawParticleSpineCurves $particles $initialSpineCurve $maxCount $frameStep $startFrame $endFrame $cleanName $groups $doPerpendicular;
+}
+
+global proc string[] shPlotParticleFindGeo(string $haystack[]) {
+	string $output[];
+	int $count = 0;
+
+	int $i;
+	for ($i = 0; $i < size($haystack); $i++) {
+		if (`attributeExists "particleBroom" $haystack[$i]`) {
+			$output[$count] = $haystack[$i];
+			$count++;
+		}
+	}
+
+	return $output;
+}
+
+global proc shPlotParticleCurvesAI(string $object) {
+	string $rels[] = `listRelatives -ad -typ "transform"`;
+
+	if (size($rels) > 0) {
+		string $geo[] = `shPlotParticleFindGeo $rels`;
+
+		print $geo;
+
+
+	}
+}
+
+global proc shPlotSelectParticleCurveWarpNode(string $trailMesh) {
+	if (`nodeType $trailMesh` == "transform") {
+		string $shPlotParticleShapeType[] = `shPlotParticleShapeType $trailMesh`;
+
+		string $getDeformer[] = `listConnections -type "curveWarp" $shPlotParticleShapeType[0]`;
+
+		if (`objExists $getDeformer[0]`) {
+			select -r $getDeformer[0];
+			AttributeEditor;
+		}
+	}
+}
+
+global proc shPlotCheckPlotParticleCurvesUI() {
+	float $startFrame = `floatField -q -v plotPartiStartFrame`;
+	float $frameStep = `floatField -q -v plotPartiFrameStep`;
+	float $endFrame = `floatField -q -v plotPartiEndFrame`;
+
+	string $particles = `textField -q -tx plotParticlesObject`;
+	int $checkObjects = `objExists $particles`;
+	int $particleCount = 0;
+	string $cache[];
+
+	int $errors = 0;
+	int $cacheError = 0;
+
+	if (`optionMenu -q -sl plotPartiCurvesOnly` < 2) {
+		text -e -en 0 plotPartiPerpendicularLabel;
+		optionMenu -e -en 0 plotPartiPerpendicular;
+	} else {
+		text -e -en 1 plotPartiPerpendicularLabel;
+		optionMenu -e -en 1 plotPartiPerpendicular;
+	}
+
+	if ($checkObjects > 0) {
+		$particleCount = `nParticle -q -ct $particles`;
+
+		$cache = `listConnections -t "cacheFile" $particles`;
+
+		if (size($cache) > 0) {
+			textField -e -tx $cache[0] plotParticlesCache;
+		} else {
+			textField -e -tx "" plotParticlesCache;
+			$cacheError++;
+		}
+	}
+
+	int $totalFrames = ($endFrame - $startFrame) / $frameStep;
+	int $totalPoints = $checkObjects * (($totalFrames * 2) - 2) * $particleCount;
+
+	int $doPerpendicular = `optionMenu -q -sl plotPartiPerpendicular`;
+
+	if ($doPerpendicular < 2) {
+		$doPerpendicular = 1;
+		$totalPoints = $totalPoints * 2;
+	} else {
+		$doPerpendicular = 0;
+	}
+
+	textField -e -tx ("Total Frame(s) to Plot: " + $totalFrames) plotPartiFrameCount;
+
+	if ($particleCount > 0) {
+		intField -e -v $particleCount plotPartiCount;
+		textField -e -tx ($particleCount + " Trail(s) with a Vertex Total of " + $totalPoints + " points.") plotPartiObjectStats;
+	} else if ($checkObjects < 1) {
+		textField -e -tx "Add a cached nParticle object." plotPartiObjectStats;
+		intField -e -v 0 plotPartiCount;
+		$errors++;
+	} else if ($particleCount < 1) {
+		textField -e -tx "No cached particles detected. You need to cache!" plotPartiObjectStats;
+		$errors++;
+	}
+
+	if ($startFrame == $endFrame || $frameStep > $endFrame) {
+		textField -e -tx "Error found in Start Frame, Frame Step and End Frame values." plotPartiFrameCount;
+		$errors++;
+	}
+
+	if ($cacheError > 0) {
+		textField -e -tx "No cache detected. You need to cache your nParticles." plotPartiFrameCount;
+	}
+
+	$errors = $errors + $cacheError;
+
+	if ($errors > 0) {
+		button -e -en 0 -bgc 1 .6 .6 -l "Create Trails" -c "" plotPartiCreateButton;
+	} else {
+		button -e -en 1 -bgc .6 1 .6 -l "Create Trails" -c ("shPlotParticleSetupSpineCurves " + $frameStep + " " + $startFrame + " " + $endFrame + " " + $doPerpendicular) plotPartiCreateButton;
+	}
+}
+
+global proc shPlotParticlesAddObject() {
+	string $sel[] = `ls -sl -fl`;
+	string $obj = `textField -q -tx plotParticlesObject`;
+
+	int $error = 0;
+
+	if (size($sel) < 1) {
+		$error++;
+	} else {
+		string $shapeType[] = `shPlotParticleShapeType $sel[0]`;
+
+		if ($shapeType[1] == "nParticle") {
+			string $cache[] = `listConnections -t "cacheFile" $shapeType[0]`;
+
+			textField -e -tx $shapeType[0] plotParticlesObject;
+
+			if (`size($cache)` > 0) {
+				textField -e -tx $cache[0] plotParticlesCache;
+			}
+		} else {
+			$error++;
+		}
+	}
+
+	if ($error > 0) {
+		print "Please select a cached nParticle object.\n";
+	}
+
+	shPlotCheckPlotParticleCurvesUI;
+}
+
+global proc shPlotParticleCurves(int $mode) {
+	string $gui = "plotParticleCurvesGUI";
+	string $sel[] = `ls -sl -fl`;
+
+	if (`window -ex $gui`) {
+		deleteUI $gui;
+	}
+
+	if (!`pluginInfo -q -l "curveWarp"`) {
+		loadPlugin "curveWarp";
+	}
+
+	if ($mode > 0) {
+		if (size($sel) < 1) {
+			print "Please select a single trail mesh.\n";
+		} else {
+			shPlotParticleCurvesAI $sel[0];
+		}
+	} else {
+		window
+			-title "Plot Particle Curves"
+			-maximizeButton false
+			-minimizeButton true
+			-sizeable false
+			-resizeToFitChildren true
+			-menuBar false
+			-menuBarVisible false
+			-w 461
+			-h 230
+		$gui;
+
+			columnLayout -adj true;
+
+				textField -ed 0 -rfc "shPlotCheckPlotParticleCurvesUI()" -tx "" plotPartiFrameCount;
+
+				separator -h 2 -st "none";
+
+				rowColumnLayout -nc 6
+					-cs 1 3 -cw 1 60
+					-cs 2 2 -cw 2 75
+					-cs 3 20 -cw 3 60
+					-cs 4 2 -cw 4 75
+					-cs 5 20 -cw 5 60
+					-cs 6 2 -cw 6 75;
+
+					text -l "Start Frame" plotPartiStartFrameLabel;
+					floatField -pre 1 -rfc "shPlotCheckPlotParticleCurvesUI()" -cc "shPlotCheckPlotParticleCurvesUI()" -dc "shPlotCheckPlotParticleCurvesUI()" -ec "shPlotCheckPlotParticleCurvesUI()" -v `playbackOptions -q -min` plotPartiStartFrame;
+
+					text -l "Frame Step" plotPartiFrameStepLabel;
+					floatField -pre 1 -rfc "shPlotCheckPlotParticleCurvesUI()" -cc "shPlotCheckPlotParticleCurvesUI()" -dc "shPlotCheckPlotParticleCurvesUI()" -ec "shPlotCheckPlotParticleCurvesUI()" -min 0.1 -v 1 plotPartiFrameStep;
+
+					text -l "End Frame" plotPartiEndFrameLabel;
+					floatField -pre 1 -rfc "shPlotCheckPlotParticleCurvesUI()" -cc "shPlotCheckPlotParticleCurvesUI()" -dc "shPlotCheckPlotParticleCurvesUI()" -ec "shPlotCheckPlotParticleCurvesUI()" -v `playbackOptions -q -max` plotPartiEndFrame;
+				setParent ..;
+
+				separator -h 2 -st "none"; separator -h 3 -st "in"; separator -h 2 -st "none";
+
+				rowColumnLayout -nc 4
+					-cs 1 3 -cw 1 138
+					-cs 2 2 -cw 2 70
+					-cs 3 63 -cw 3 100
+					-cs 4 2 -cw 4 70;
+
+					text -l "Create Perpendicular Trail?" -al "right" plotPartiPerpendicularLabel;
+					optionMenu -cc "shPlotCheckPlotParticleCurvesUI()" plotPartiPerpendicular;
+						menuItem -l "Yes" -p plotPartiPerpendicular;
+						menuItem -l "No" -p plotPartiPerpendicular;
+
+					optionMenu -e -sl 2 plotPartiPerpendicular;
+
+					text -l "Plot Curves Only?" -al "right" plotPartiCurvesOnlyLabel;
+					optionMenu -cc "shPlotCheckPlotParticleCurvesUI()" plotPartiCurvesOnly;
+						menuItem -l "Yes" -p plotPartiCurvesOnly;
+						menuItem -l "No" -p plotPartiCurvesOnly;
+				setParent ..;
+
+				optionMenu -e -sl 2 plotPartiCurvesOnly;
+
+				separator -h 2 -st "none"; separator -h 3 -st "in"; separator -h 2 -st "none";
+
+				textField -ed 0 -tx "" plotPartiObjectStats;
+
+				separator -h 2 -st "none";
+
+				rowColumnLayout -nc 3
+					-cs 1 1 -cw 1 55
+					-cs 2 5 -cw 2 315
+					-cs 3 2 -cw 3 75;
+
+					text -l "Particles" -al "right" plotParticlesObjectLabel;
+					textField -tx "" plotParticlesObject;
+					button -l "Add Selected" -c "shPlotParticlesAddObject()" plotAddClearObjectsButton;
+				setParent ..;
+
+				separator -h 2 -st "none";
+
+				rowColumnLayout -nc 2
+					-cs 1 1 -cw 1 55
+					-cs 2 5 -cw 2 315;
+
+					text -l "Cache" -al "right" plotParticlesCacheLabel;
+					textField -ed 0 -tx "" plotParticlesCache;
+				setParent ..;
+
+				separator -h 2 -st "none";
+
+				rowColumnLayout -nc 2
+					-cs 1 3 -cw 1 55
+					-cs 2 2 -cw 2 75;
+
+					text -l "Count" -al "right" plotPartiCountLabel;
+					intField -ed 0 -rfc "shPlotCheckPlotParticleCurvesUI()" -cc "shPlotCheckPlotParticleCurvesUI()" -dc "shPlotCheckPlotParticleCurvesUI()" -ec "shPlotCheckPlotParticleCurvesUI()" -v 0 plotPartiCount;
+				setParent ..;
+
+				separator -h 2 -st "none"; separator -h 3 -st "out"; separator -h 2 -st "none";
+
+				progressBar plotPartiProgressBar;
+
+				separator -h 3 -st "none";
+
+				button -l "Create Trails" plotPartiCreateButton;
+			setParent ..;
+
+		showWindow $gui;
+
+		if (size($sel) > 0) {
+			shPlotParticlesAddObject();
+		} else {
+			shPlotCheckPlotParticleCurvesUI();
+		}
+	}
+}
